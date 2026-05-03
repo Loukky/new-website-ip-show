@@ -46,11 +46,11 @@ var refreshClientIP = function() {
     var year = new Date().getFullYear();
     if (year < 2019) year = 2019;
     T('since_year').innerHTML = year;
-    ajaxGet('https://clientapi.ipip.net/browser/myip', function(info) {
-        if (info.ret == 0) {
-            T('client_ip').innerHTML = info.data.client_ip + ' ' + info.data.location;
+    ajaxGet('https://geoip.loukky.com/ip.php', function(info) {
+        if (info.status === 'success') {
+            T('client_ip').textContent = info.ip + ' ' + info.location;
         } else {
-            T('client_ip').innerHTML = info.msg;
+            T('client_ip').textContent = '获取失败';
         }
     });
 };
@@ -76,11 +76,16 @@ var load = function(ip, domain) {
             return;
         }
 
-        ajaxGet("https://clientapi.ipip.net/browser/chrome?ip=" + ip + '&l='+navigator.language+'&domain=' + domain, function(info) {
-            if (info.ret == 0) {
+        ajaxGet("https://geoip.loukky.com/ip.php?ip=" + encodeURIComponent(domain) + "&ecs=" + clientIP, function(info) {
+             if (info.status === 'success') {
                 // 保存数据到background
-                chrome.runtime.sendMessage({action: 'saveIPData', ip: ip, ipData: info.data, dnsData: info.dns});
-                render(info.data);
+               chrome.runtime.sendMessage({
+                    action: 'saveIPData',
+                    ip: ip, 
+                    ipData: info,
+                    dnsData: (info.resolved_ips || []).map(function(i){ return {ip:i}; })
+                });
+                render(info);
             } else {
                 T('load').style.display = '';
             }
@@ -89,15 +94,12 @@ var load = function(ip, domain) {
 };
 
 var render = function(info){
-
-   // T('domain_dns_ip').innerHTML = info.dns_ip.join(" ");
+    console.log("render触发:", info);
     T('show_ip').innerHTML = info.ip;
     T('location').innerHTML = info.country + " " + info.province + " " + info.city;
     T('isp').innerHTML = info.isp;
-    T('asn').innerHTML = info.asn.join("<br/>");
-    T('ports').innerHTML = info.ports.join(" ");
-  //  T('ipip').style.display = '';
-   // T('load').style.display = 'none';
+    T('asn').innerHTML = info.asn ? ("AS" + info.asn) : "";
+    T('ports').textContent = "";
 };
 
 var refresh = function() {
@@ -161,9 +163,9 @@ var init = function() {
     }); 
 
     if (language.indexOf('CN') > -1) {
-		chrome.action.setTitle({title:"网站IP数据信息 Powered by IPIP.net"});
+		chrome.action.setTitle({title:"网站IP数据信息"});
 	} else {
-		chrome.action.setTitle({title:"WebSite IP Information query Powered by IPIP.net"});
+		chrome.action.setTitle({title:"WebSite IP Information query"});
 	}
 
     refreshClientIP();
@@ -183,7 +185,7 @@ var init = function() {
 
     T("to_ipip").onclick = function() {
         var fip = $('#show_ip').html();
-        chrome.tabs.create({ url: "https://www.ipip.net/ip/"+fip+".html", selected: false }, function(tab) {
+        chrome.tabs.create({ url: "https://geoip.loukky.com/?ip="+fip, selected: false }, function(tab) {
             // chrome.tabs.executeScript(tab.id, {
             //     code: "var input=document.getElementById('ip');input.value='" + fip + "';input.form.submit();"
             // })
@@ -203,9 +205,6 @@ var init = function() {
         });
     });
 
-    new Fingerprint2().get(function(result, components){
-        $.post('https://www.ipip.net/fingerprint.php', {hash:result, components:components}, function(){})
-    })
 
     domain_view();
     

@@ -32,26 +32,34 @@ var ipData = {};
 var dnsData = {};
 var domainList = [];
 var lang = navigator.language;
+var clientIP = "";
+
+async function initClientIP() {
+    try {
+        const res = await fetch("https://geoip.loukky.com/myip.php");
+        clientIP = (await res.text()).trim();
+        console.log("🌍 本机IP:", clientIP);
+    } catch (e) {
+        console.warn("❌ 获取本机IP失败", e);
+    }
+}
+initClientIP();
 
 var renderIcon = function(info){
     console.log('🎨 渲染图标，IP信息:', info);
     var title = '';
     if (info.country && info.country.length > 0) {
-        if (info.country_code == 'HK' || info.country_code == 'MO' || info.country_code == 'TW') {
-            title = info.country + ' ' + info.province;
-        } else {
-            title = info.country;
-        }
+        title = info.country;
         console.log('🏷️ 设置标题:', title);
         if (lang.indexOf('CN') > -1) {
-            chrome.action.setTitle({title:"当前网站的IP地址为："+ title +"\n"+ "IP数据信息 Powered by IPIP.net"});
+            chrome.action.setTitle({title:"当前网站的IP地址为："+ title +"\n"+ "IP数据信息"});
         } else {
-            chrome.action.setTitle({title:"The current site IP GeoLocation："+ title +"\n"+ "IP Info Powered by IPIP.net"});
+            chrome.action.setTitle({title:"The current site IP GeoLocation："+ title +"\n"+ "IP Info"});
         }
     }
-    if (info.country_code && info.country_code.length == 2) {
-        const iconPath = chrome.runtime.getURL("icons/" + info.country_code + ".png");
-        console.log('🏳️ 设置国家图标:', info.country_code, iconPath);
+    if (info.code2 && info.code2.length == 2) {
+        const iconPath = chrome.runtime.getURL("icons/" + info.code2 + ".png");
+        console.log('🏳️ 设置国家图标:', info.code2, iconPath);
         chrome.action.setIcon({path: iconPath});
     } else {
         const defaultIconPath = chrome.runtime.getURL("Q.png");
@@ -62,7 +70,7 @@ var renderIcon = function(info){
 
 var getSelection = function(info, tab) {
     console.log('🔍 右键搜索:', info.selectionText);
-    var url = "https://www.ipip.net/ip/" + info.selectionText + ".html";
+    var url = "https://geoip.loukky.com/?ip=" + info.selectionText;
     chrome.tabs.create({url: url});
 };
 
@@ -125,16 +133,16 @@ chrome.webRequest.onCompleted.addListener(function(details) {
         tabsIPMap[details.tabId] = details.ip;
 
         // 使用真实IP查询地理位置信息
-        const apiUrl = "https://clientapi.ipip.net/browser/chrome?ip=" + details.ip + '&l=' + navigator.language + '&domain=' + domain;
+        const apiUrl = "https://geoip.loukky.com/ip.php?ip=" + domain + '&ecs=' + clientIP;
         console.log('🔍 查询IP地理位置信息:', details.ip);
         console.log('🔍 请求URL:', apiUrl);
         
         ajaxGet(apiUrl, function(info){
             console.log('📊 地理位置API返回结果:', info);
-            if (info.ret == 0) {
-                ipData[details.ip] = info.data;
-                dnsData[details.ip] = info.dns;
-                renderIcon(info.data);
+            if (info.status == "success") {
+                ipData[details.ip] = info.ip;
+                dnsData[details.ip] = info.resolved_ips;
+                renderIcon(info);
                 chrome.action.enable(details.tabId);
                 console.log('🎯 扩展已启用，IP:', details.ip);
             } else {
@@ -181,7 +189,7 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse){
         console.log('📊 请求IP数据:', request.ip);
         const response = {
             ipData: ipData[request.ip],
-            dnsData: dnsData[request.ip]
+            dnsData: ipData[request.ip]
         };
         console.log('📤 返回IP数据:', response);
         sendResponse(response);
@@ -189,7 +197,7 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse){
     } else if (request.action === 'saveIPData') {
         console.log('💾 保存IP数据:', request.ip, request.ipData);
         ipData[request.ip] = request.ipData;
-        dnsData[request.ip] = request.dnsData;
+        dnsData[request.ip] = request.resolved_ips;
         sendResponse({success: true});
         return true;
     } else if (request.action === 'getTabData') {
