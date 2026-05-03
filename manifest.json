@@ -1,0 +1,32 @@
+{
+   "action": {
+      "default_icon": {
+         "19": "images/icon_19.png",
+         "38": "images/icon_38.png"
+      },
+      "default_popup": "popup.html",
+      "default_title": "WebSite IP Information query Powered by IPIP.net"
+   },
+   "background": {
+      "service_worker": "js/background.js"
+   },
+   "content_scripts": [ {
+      "js": [ "js/jquery-3.3.1.min.js", "js/psl.min.js", "js/content-script.js" ],
+      "matches": [ "\u003Call_urls>" ],
+      "run_at": "document_end"
+   } ],
+   "default_locale": "zh_CN",
+   "description": "__MSG_extDescription__",
+   "host_permissions": [ "http://*/*", "https://*/*" ],
+   "icons": {
+      "128": "images/icon_128.png",
+      "16": "images/icon_16.png",
+      "48": "images/icon_48.png"
+   },
+   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1KNPZC2VTuc5f72XXQWr1sz71f9HMJGxjs/tRHDitOzfdDUjz/DQMUogAnE1rGD2rNNZ3OOFLeg320UtaYqZ9jalHnbd0+8F4E7gY/m2aBtfMwXSZyHcvKfJ8nfjnV3gyvIZ3ZSOGl/Ekty6nf9yRV+pOS+M7NTcJfbnVSeghQJ1Ri7vV155QcMM1Chm1ua6Ze8bVbcH+HbxffUvzK7AfAzSQUzsTMuQjb5J3YE6rbCN4E4G5JRYaydUFBSaHR3rWRXuVL0gusvgnNBDfqNaa2qMO4FvwQbSfpJTWiJ62KKIuVikZVvLG8+v7nfojexFxKgU6FZ2uwmbArEKtZ9gQwIDAQAB",
+   "manifest_version": 3,
+   "name": "__MSG_extName__",
+   "permissions": [ "contextMenus", "activeTab", "webRequest" ],
+   "update_url": "https://clients2.google.com/service/update2/crx",
+   "version": "3.4.3"
+}
