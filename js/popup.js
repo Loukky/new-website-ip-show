@@ -2,7 +2,7 @@ var queryIp = '';
 var queryDomain = '';
 var refreshTimerId = 0;
 var refreshCount = 0;
-var maxRefresh = 3;
+var maxRefresh = 5;   // 增加重试次数，给Service Worker恢复Storage数据留出时间
 var activeTabId = 0;
 // V3中使用chrome.runtime.getBackgroundPage()已被弃用，改用消息传递
 var background = null;

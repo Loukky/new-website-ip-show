@@ -34,6 +34,108 @@ var domainList = [];
 var lang = navigator.language;
 var clientIP = "";
 
+// ----- Chrome Storage Session 持久化辅助函数 (MV3 Service Worker 生存周期兼容) -----
+const STORAGE_KEYS = {
+    TABS_IP_MAP: 'persisted_tabsIPMap',
+    TABS_DOMAIN_MAP: 'persisted_tabsDomainMap',
+    IP_DATA: 'persisted_ipData',
+    DNS_DATA: 'persisted_dnsData',
+    DOMAIN_LIST: 'persisted_domainList',
+};
+
+// 从 chrome.storage.session 恢复数据
+async function restoreFromStorage() {
+    try {
+        const result = await chrome.storage.session.get([
+            STORAGE_KEYS.TABS_IP_MAP,
+            STORAGE_KEYS.TABS_DOMAIN_MAP,
+            STORAGE_KEYS.IP_DATA,
+            STORAGE_KEYS.DNS_DATA,
+            STORAGE_KEYS.DOMAIN_LIST
+        ]);
+        if (result[STORAGE_KEYS.TABS_IP_MAP]) {
+            tabsIPMap = result[STORAGE_KEYS.TABS_IP_MAP];
+            console.log('📦 从Storage恢复 tabsIPMap:', tabsIPMap);
+        }
+        if (result[STORAGE_KEYS.TABS_DOMAIN_MAP]) {
+            tabsDomainMap = result[STORAGE_KEYS.TABS_DOMAIN_MAP];
+            console.log('📦 从Storage恢复 tabsDomainMap:', tabsDomainMap);
+        }
+        if (result[STORAGE_KEYS.IP_DATA]) {
+            ipData = result[STORAGE_KEYS.IP_DATA];
+            console.log('📦 从Storage恢复 ipData:', ipData);
+        }
+        if (result[STORAGE_KEYS.DNS_DATA]) {
+            dnsData = result[STORAGE_KEYS.DNS_DATA];
+            console.log('📦 从Storage恢复 dnsData:', dnsData);
+        }
+        if (result[STORAGE_KEYS.DOMAIN_LIST]) {
+            domainList = result[STORAGE_KEYS.DOMAIN_LIST];
+            console.log('📦 从Storage恢复 domainList:', domainList);
+        }
+    } catch (e) {
+        console.warn('⚠️ 从Storage恢复数据失败:', e);
+    }
+}
+
+// 将数据持久化到 chrome.storage.session
+async function persistToStorage() {
+    try {
+        await chrome.storage.session.set({
+            [STORAGE_KEYS.TABS_IP_MAP]: tabsIPMap,
+            [STORAGE_KEYS.TABS_DOMAIN_MAP]: tabsDomainMap,
+            [STORAGE_KEYS.IP_DATA]: ipData,
+            [STORAGE_KEYS.DNS_DATA]: dnsData,
+            [STORAGE_KEYS.DOMAIN_LIST]: domainList,
+        });
+    } catch (e) {
+        console.warn('⚠️ 持久化数据到Storage失败:', e);
+    }
+}
+
+// 存储数据到各 map，并同时持久化
+function setTabData(tabId, ip, domain) {
+    tabsIPMap[tabId] = ip;
+    tabsDomainMap[tabId] = domain;
+    persistToStorage();
+}
+
+function setIpData(ip, data, dns) {
+    ipData[ip] = data;
+    dnsData[ip] = dns;
+    persistToStorage();
+}
+
+// ----- 初始化 & 存储就绪标志 -----
+let storageReady = false;  // 标志：Storage数据是否已恢复完成
+let pendingActivatedTabId = null;  // 在恢复完成前暂存的激活tabId
+
+async function init() {
+    await restoreFromStorage();
+    console.log('🔄 恢复后的 tabsIPMap:', tabsIPMap);
+    console.log('🔄 恢复后的 ipData:', ipData);
+    
+    // 标记Storage已就绪
+    storageReady = true;
+    
+    // 处理在恢复过程中暂存的标签页激活事件
+    if (pendingActivatedTabId !== null) {
+        console.log('🔄 处理恢复期间暂存的标签页激活:', pendingActivatedTabId);
+        handleTabActivated(pendingActivatedTabId);
+        pendingActivatedTabId = null;
+    }
+    
+    // 在所有已存在的标签页上应用恢复后的图标状态
+    const allTabIds = Object.keys(tabsIPMap).map(Number);
+    for (const tabId of allTabIds) {
+        const ip = tabsIPMap[tabId];
+        if (ip && ipData[ip]) {
+            chrome.action.enable(tabId);
+            chrome.action.setIcon({tabId: tabId, path: chrome.runtime.getURL("images/icon_38.png")});
+        }
+    }
+}
+
 async function initClientIP() {
     try {
         const res = await fetch("https://geoip.loukky.com/myip.php");
@@ -43,7 +145,6 @@ async function initClientIP() {
         console.warn("❌ 获取本机IP失败", e);
     }
 }
-initClientIP();
 
 var renderIcon = function(info){
     console.log('🎨 渲染图标，IP信息:', info);
@@ -120,7 +221,6 @@ chrome.contextMenus.onClicked.addListener(function(info, tab) {
 });
 
 // V3中使用webRequest API（只观察模式，不阻塞）
-// 恢复原有的IP获取逻辑，但移除blocking功能
 console.log('🔧 注册webRequest.onCompleted监听器');
 chrome.webRequest.onCompleted.addListener(function(details) {
     console.log('🌐 WebRequest完成:', details.url, 'IP:', details.ip, 'TabId:', details.tabId);
@@ -129,8 +229,8 @@ chrome.webRequest.onCompleted.addListener(function(details) {
         var domain = new URL(details.url).hostname;
         console.log('📍 获取到真实IP:', details.ip, '域名:', domain);
         
-        tabsDomainMap[details.tabId] = domain;
-        tabsIPMap[details.tabId] = details.ip;
+        // 使用持久化存储
+        setTabData(details.tabId, details.ip, domain);
 
         // 使用真实IP查询地理位置信息
         const apiUrl = "https://geoip.loukky.com/ip.php?ip=" + domain + '&ecs=' + clientIP;
@@ -141,11 +241,9 @@ chrome.webRequest.onCompleted.addListener(function(details) {
             console.log('📊 地理位置API返回结果:', info);
             if (info.status == "success") {
                 // 存储完整的IP信息对象，供renderIcon和popup使用
-                ipData[details.ip] = info;
-                // 将resolved_ips字符串数组转换为对象数组，与popup.js期望的格式一致
-                dnsData[details.ip] = (info.resolved_ips || []).map(function(ip) {
+                setIpData(details.ip, info, (info.resolved_ips || []).map(function(ip) {
                     return {ip: ip};
-                });
+                }));
                 renderIcon(info);
                 chrome.action.enable(details.tabId);
                 console.log('🎯 扩展已启用，IP:', details.ip);
@@ -163,22 +261,39 @@ chrome.webRequest.onCompleted.addListener(function(details) {
 chrome.tabs.onCreated.addListener(function(tab){
     console.log('🆕 新标签页创建:', tab.tabId);
     chrome.action.disable(tab.tabId);
-    chrome.action.setIcon({path: chrome.runtime.getURL("images/icon_gray_38.png")});
+    chrome.action.setIcon({tabId: tab.tabId, path: chrome.runtime.getURL("images/icon_gray_38.png")});
     console.log('🔒 扩展已禁用，设置灰色图标');
 });
 
-chrome.tabs.onActivated.addListener(function(e){
-    console.log('🔄 标签页激活:', e.tabId);
-    if (tabsIPMap[e.tabId]) {
-        console.log('📍 找到已缓存的IP信息:', tabsIPMap[e.tabId]);
-        chrome.action.setIcon({path: chrome.runtime.getURL("images/icon_38.png")});
-        chrome.action.enable(e.tabId);
-        if (ipData[tabsIPMap[e.tabId]]) {
+// 提取标签页激活处理为单独函数，用于直接在onActivated和恢复后延迟调用
+function handleTabActivated(tabId) {
+    console.log('🔄 处理标签页激活:', tabId);
+    if (tabsIPMap[tabId]) {
+        console.log('📍 找到已缓存的IP信息:', tabsIPMap[tabId]);
+        chrome.action.setIcon({tabId: tabId, path: chrome.runtime.getURL("images/icon_38.png")});
+        chrome.action.enable(tabId);
+        if (ipData[tabsIPMap[tabId]]) {
             console.log('🎨 重新渲染图标');
-            renderIcon(ipData[tabsIPMap[e.tabId]]);
+            renderIcon(ipData[tabsIPMap[tabId]]);
         }
     } else {
-        console.log('❓ 未找到该标签页的IP信息');
+        console.log('❓ 未找到该标签页的IP信息:', tabId);
+        chrome.action.disable(tabId);
+        chrome.action.setIcon({tabId: tabId, path: chrome.runtime.getURL("images/icon_gray_38.png")});
+    }
+}
+
+chrome.tabs.onActivated.addListener(function(e){
+    console.log('🔄 标签页激活事件:', e.tabId);
+    if (!storageReady) {
+        // 如果Storage数据还在恢复中，暂存此tabId，待恢复完成后处理
+        console.log('⏳ Storage正在恢复，暂存标签页激活:', e.tabId);
+        pendingActivatedTabId = e.tabId;
+        // 先设置灰色图标，避免显示错误图标
+        chrome.action.disable(e.tabId);
+        chrome.action.setIcon({tabId: e.tabId, path: chrome.runtime.getURL("images/icon_gray_38.png")});
+    } else {
+        handleTabActivated(e.tabId);
     }
 });
 
@@ -200,8 +315,7 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse){
         return true;
     } else if (request.action === 'saveIPData') {
         console.log('💾 保存IP数据:', request.ip, request.ipData);
-        ipData[request.ip] = request.ipData;
-        dnsData[request.ip] = request.resolved_ips;
+        setIpData(request.ip, request.ipData, request.resolved_ips);
         sendResponse({success: true});
         return true;
     } else if (request.action === 'getTabData') {
@@ -224,6 +338,7 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse){
             });
         }
         console.log('✅ 域名列表已更新:', domainList);
+        persistToStorage();
         sendResponse({success: true});
         return true;
     }
@@ -231,5 +346,11 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse){
     console.warn('❓ 未知消息类型:', request);
     return false;
 });
+
+// 初始化：先恢复Storage中的数据，然后获取本机IP
+init().then(() => {
+    console.log('✅ Storage数据恢复完成');
+});
+initClientIP();
 
 console.log('✅ Service Worker 初始化完成');
