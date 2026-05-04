@@ -79,9 +79,15 @@ var load = function(ip, domain) {
             return;
         }
 
-        ajaxGet("https://geoip.loukky.com/ip.php?ip=" + encodeURIComponent(domain) + "&ecs=" + clientIP, function(info) {
+        // 如果缓存中没有 browser-side IP 的数据，则优先使用 browser-side IP 查询
+        // 如果是本地回环IP，则改用域名查询 server-side IP
+        var queryTarget = ip;
+        if (ip === "127.0.0.1" || ip === "::1" || ip === "0.0.0.0" || ip === "localhost") {
+            queryTarget = domain;
+        }
+        ajaxGet("https://geoip.loukky.com/ip.php?ip=" + encodeURIComponent(queryTarget) + "&ecs=" + clientIP, function(info) {
              if (info.status === 'success') {
-                // 保存数据到background
+                // 保存数据到background，以browser-side IP为key
                chrome.runtime.sendMessage({
                     action: 'saveIPData',
                     ip: ip, 

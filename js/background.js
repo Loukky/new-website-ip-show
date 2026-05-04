@@ -118,21 +118,27 @@ async function init() {
     // 标记Storage已就绪
     storageReady = true;
     
-    // 处理在恢复过程中暂存的标签页激活事件
-    if (pendingActivatedTabId !== null) {
-        console.log('🔄 处理恢复期间暂存的标签页激活:', pendingActivatedTabId);
-        handleTabActivated(pendingActivatedTabId);
-        pendingActivatedTabId = null;
-    }
-    
-    // 在所有已存在的标签页上应用恢复后的图标状态
+    // 在所有已存在的标签页上应用恢复后的图标状态（使用国家图标或默认图标）
     const allTabIds = Object.keys(tabsIPMap).map(Number);
     for (const tabId of allTabIds) {
         const ip = tabsIPMap[tabId];
         if (ip && ipData[ip]) {
             chrome.action.enable(tabId);
-            chrome.action.setIcon({tabId: tabId, path: chrome.runtime.getURL("images/icon_38.png")});
+            const info = ipData[ip];
+            if (info.code2 && info.code2 !== "zz" && info.code2.length == 2) {
+                const iconPath = chrome.runtime.getURL("icons/" + info.code2.toUpperCase() + ".png");
+                chrome.action.setIcon({tabId: tabId, path: iconPath});
+            } else {
+                chrome.action.setIcon({tabId: tabId, path: chrome.runtime.getURL("images/icon_38.png")});
+            }
         }
+    }
+    
+    // 最后处理在恢复过程中暂存的标签页激活事件（确保覆盖 init 中设置的图标）
+    if (pendingActivatedTabId !== null) {
+        console.log('🔄 处理恢复期间暂存的标签页激活:', pendingActivatedTabId);
+        handleTabActivated(pendingActivatedTabId);
+        pendingActivatedTabId = null;
     }
 }
 
@@ -146,8 +152,9 @@ async function initClientIP() {
     }
 }
 
-var renderIcon = function(info){
-    console.log('🎨 渲染图标，IP信息:', info);
+// tabId 参数可选：如果传入了 tabId，则为指定标签页设置图标（覆盖全局默认图标）
+var renderIcon = function(info, tabId){
+    console.log('🎨 渲染图标，IP信息:', info, 'tabId:', tabId);
     var title = '';
     if (info.country && info.country.length > 0) {
         title = info.country;
@@ -161,11 +168,19 @@ var renderIcon = function(info){
     if (info.code2 && info.code2 !== "zz" && info.code2.length == 2) {
         const iconPath = chrome.runtime.getURL("icons/" + info.code2.toUpperCase() + ".png");
         console.log('🏳️ 设置国家图标:', info.code2, iconPath);
-        chrome.action.setIcon({path: iconPath});
+        if (tabId !== undefined) {
+            chrome.action.setIcon({tabId: tabId, path: iconPath});
+        } else {
+            chrome.action.setIcon({path: iconPath});
+        }
     } else {
         const defaultIconPath = chrome.runtime.getURL("Q.png");
         console.log('🏳️ 设置默认图标:', defaultIconPath);
-        chrome.action.setIcon({path: defaultIconPath});
+        if (tabId !== undefined) {
+            chrome.action.setIcon({tabId: tabId, path: defaultIconPath});
+        } else {
+            chrome.action.setIcon({path: defaultIconPath});
+        }
     }
 };
 
@@ -232,9 +247,13 @@ chrome.webRequest.onCompleted.addListener(function(details) {
         // 使用持久化存储
         setTabData(details.tabId, details.ip, domain);
 
-        // 使用真实IP查询地理位置信息
-        const apiUrl = "https://geoip.loukky.com/ip.php?ip=" + domain + '&ecs=' + clientIP;
-        console.log('🔍 查询IP地理位置信息:', details.ip);
+        // 优先使用浏览器实际连接的IP查询地理位置（browser-side IP）
+        // 如果是本地回环IP（127.0.0.1, ::1 等），则改用域名查询（server-side IP）
+        const lookupTarget = (details.ip === "127.0.0.1" || details.ip === "::1" || details.ip === "0.0.0.0" || details.ip === "localhost")
+            ? domain
+            : details.ip;
+        const apiUrl = "https://geoip.loukky.com/ip.php?ip=" + encodeURIComponent(lookupTarget) + '&ecs=' + clientIP;
+        console.log('🔍 查询IP地理位置信息:', details.ip, '查询目标:', lookupTarget);
         console.log('🔍 请求URL:', apiUrl);
         
         ajaxGet(apiUrl, function(info){
@@ -244,7 +263,8 @@ chrome.webRequest.onCompleted.addListener(function(details) {
                 setIpData(details.ip, info, (info.resolved_ips || []).map(function(ip) {
                     return {ip: ip};
                 }));
-                renderIcon(info);
+                // 为当前标签页设置 per-tab 图标
+                renderIcon(info, details.tabId);
                 chrome.action.enable(details.tabId);
                 console.log('🎯 扩展已启用，IP:', details.ip);
             } else {
@@ -270,11 +290,14 @@ function handleTabActivated(tabId) {
     console.log('🔄 处理标签页激活:', tabId);
     if (tabsIPMap[tabId]) {
         console.log('📍 找到已缓存的IP信息:', tabsIPMap[tabId]);
-        chrome.action.setIcon({tabId: tabId, path: chrome.runtime.getURL("images/icon_38.png")});
         chrome.action.enable(tabId);
         if (ipData[tabsIPMap[tabId]]) {
             console.log('🎨 重新渲染图标');
-            renderIcon(ipData[tabsIPMap[tabId]]);
+            // 传入 tabId 确保图标正确设置到该标签页
+            renderIcon(ipData[tabsIPMap[tabId]], tabId);
+        } else {
+            // 有IP缓存但没有地理位置数据时使用默认图标
+            chrome.action.setIcon({tabId: tabId, path: chrome.runtime.getURL("images/icon_38.png")});
         }
     } else {
         console.log('❓ 未找到该标签页的IP信息:', tabId);
