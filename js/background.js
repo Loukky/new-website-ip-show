@@ -57,8 +57,8 @@ var renderIcon = function(info){
             chrome.action.setTitle({title:"The current site IP GeoLocation："+ title +"\n"+ "IP Info"});
         }
     }
-    if (info.code2 && info.code2.length == 2) {
-        const iconPath = chrome.runtime.getURL("icons/" + info.code2 + ".png");
+    if (info.code2 && info.code2 !== "zz" && info.code2.length == 2) {
+        const iconPath = chrome.runtime.getURL("icons/" + info.code2.toUpperCase() + ".png");
         console.log('🏳️ 设置国家图标:', info.code2, iconPath);
         chrome.action.setIcon({path: iconPath});
     } else {
@@ -140,8 +140,12 @@ chrome.webRequest.onCompleted.addListener(function(details) {
         ajaxGet(apiUrl, function(info){
             console.log('📊 地理位置API返回结果:', info);
             if (info.status == "success") {
-                ipData[details.ip] = info.ip;
-                dnsData[details.ip] = info.resolved_ips;
+                // 存储完整的IP信息对象，供renderIcon和popup使用
+                ipData[details.ip] = info;
+                // 将resolved_ips字符串数组转换为对象数组，与popup.js期望的格式一致
+                dnsData[details.ip] = (info.resolved_ips || []).map(function(ip) {
+                    return {ip: ip};
+                });
                 renderIcon(info);
                 chrome.action.enable(details.tabId);
                 console.log('🎯 扩展已启用，IP:', details.ip);
@@ -189,7 +193,7 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse){
         console.log('📊 请求IP数据:', request.ip);
         const response = {
             ipData: ipData[request.ip],
-            dnsData: ipData[request.ip]
+            dnsData: dnsData[request.ip]
         };
         console.log('📤 返回IP数据:', response);
         sendResponse(response);
@@ -213,7 +217,7 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse){
     } else if (request.ds) {
         console.log('🌐 处理域名列表:', request.ds);
         domainList = [];
-        for (p in request.ds) {
+        for (var p in request.ds) {
             domainList.push({
                 "domain" : p,
                 "amount" : request.ds[p],
