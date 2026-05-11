@@ -59,24 +59,16 @@ var refreshClientIP = function() {
 };
 
 var load = function(ip, domain) {
-    var isv6 = false;
     const isLocalIP = (ip === "127.0.0.1" || ip === "::1" || ip === "0.0.0.0" || ip === "localhost");
     
     // 先加载 DNS 列表（resolved_ips），使用 domainKey 获取
     chrome.runtime.sendMessage({action: 'getDomainIPData', tabId: activeTabId, domain: domain}, function(response) {
         if (response && response.dnsData) {
             $.each(response.dnsData, function(k, v){
-                if (v.ip.indexOf(':') > -1) {
-                    isv6 = true;
-                }
                 if (v.ip != ip) {
                     $('#dns').append('<dd data-ip="' + v.ip + '"><span>' + v.ip + '<span><span class="arrows glyphicon glyphicon-triangle-right"></span></dd>')
                 }
             });
-        }
-        if (!isv6) {
-            T('layoutL').style.width = '25%';
-            T('layoutR').style.width = '75%';
         }
     });
 
