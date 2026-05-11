@@ -281,26 +281,50 @@ chrome.webRequest.onCompleted.addListener(function(details) {
             }
         });
 
-        // ========== 第二步：始终用 browser-side IP 查询（获取直连IP地理位置，用于图标渲染）==========
-        const browserApiUrl = "https://geoip.loukky.com/ip.php?ip=" + encodeURIComponent(details.ip);
-        console.log('🔍 [Browser-Side] IP查询:', browserApiUrl);
-        ajaxGet(browserApiUrl, function(browserInfo){
-            if (browserInfo.status == "success") {
-                // 保存 browser-side 数据
-                setIpData(details.ip, browserInfo, (browserInfo.resolved_ips || []).map(function(ip) {
+        // ========== 第二步：仅直连时查询 browser-side IP ==========
+if (!isLocalIP) {
+
+    const browserApiUrl =
+        "https://geoip.loukky.com/ip.php?ip=" +
+        encodeURIComponent(details.ip);
+
+    console.log('🔍 [Browser-Side] IP查询:', browserApiUrl);
+
+    ajaxGet(browserApiUrl, function(browserInfo){
+
+        if (browserInfo.status == "success") {
+
+            // 保存 browser-side 数据
+            setIpData(
+                details.ip,
+                browserInfo,
+                (browserInfo.resolved_ips || []).map(function(ip) {
                     return {ip: ip};
-                }));
-                // 如果是直连（非回环IP），使用 browser-side IP 的数据渲染国别图标
-                if (!isLocalIP) {
-                    renderIcon(browserInfo, details.tabId);
-                    chrome.action.enable(details.tabId);
-                    console.log('🎯 [直连] 使用browser-side IP渲染图标，IP:', details.ip);
-                }
-            } else {
-                console.warn('⚠️ IP查询API返回错误:', browserInfo);
-            }
-        });
-    }
+                })
+            );
+
+            // 直连：使用 browser-side GEO
+            renderIcon(browserInfo, details.tabId);
+
+            chrome.action.enable(details.tabId);
+
+            console.log(
+                '🎯 [直连] 使用browser-side IP渲染图标，IP:',
+                details.ip
+            );
+
+        } else {
+
+            console.warn(
+                '⚠️ IP查询API返回错误:',
+                browserInfo
+            );
+
+        }
+
+    });
+
+}
 }, {
     urls: ["http://*/*", "https://*/*"],
     types: ["main_frame"]
