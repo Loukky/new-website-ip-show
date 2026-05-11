@@ -282,7 +282,7 @@ chrome.webRequest.onCompleted.addListener(function(details) {
         });
 
         // ========== 第二步：始终用 browser-side IP 查询（获取直连IP地理位置，用于图标渲染）==========
-        const browserApiUrl = "https://geoip.loukky.com/ip.php?ip=" + encodeURIComponent(details.ip) + '&ecs=' + clientIP;
+        const browserApiUrl = "https://geoip.loukky.com/ip.php?ip=" + encodeURIComponent(details.ip);
         console.log('🔍 [Browser-Side] IP查询:', browserApiUrl);
         ajaxGet(browserApiUrl, function(browserInfo){
             if (browserInfo.status == "success") {
