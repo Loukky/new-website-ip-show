@@ -157,36 +157,90 @@ var refresh = function() {
 var init = function() {
 
     $('.ips').delegate('dd', 'click', function(){
-        var ip = $(this).text().trim();
-        if (ip.indexOf('.') == -1 && ip.indexOf(':') == -1) { //domains
-            $('#layoutR').hide();
-            $('#layoutR2').show();
-            $('.ips dd').removeClass('active');
-            $(this).addClass('active');
-            return;
-        } else { // ips
-            $('#layoutR').show();
-            $('#layoutR2').hide();
-        }
+
+    var ip = $(this).text().trim();
+
+    if (ip.indexOf('.') == -1 && ip.indexOf(':') == -1) { // domains
+
+        $('#layoutR').hide();
+        $('#layoutR2').show();
+
         $('.ips dd').removeClass('active');
         $(this).addClass('active');
-        
-        // 如果是主IP（browser_dns_ip），使用 domain-aware 查询从缓存获取完整信息
-        if (ip == queryIp) {
-            chrome.runtime.sendMessage({action: 'getDomainIPData', tabId: activeTabId, domain: queryDomain}, function(response) {
+
+        return;
+
+    } else { // ips
+
+        $('#layoutR').show();
+        $('#layoutR2').hide();
+
+    }
+
+    $('.ips dd').removeClass('active');
+    $(this).addClass('active');
+
+    // browser-side 是否为本地代理
+    const isLocalBrowserIP =
+        queryIp === "127.0.0.1" ||
+        queryIp === "::1" ||
+        queryIp === "0.0.0.0" ||
+        queryIp === "localhost";
+
+    // 点击的是 browser-side 主IP
+    if (ip == queryIp) {
+
+        // 本地代理
+        // 显示 server-side GEO
+        if (isLocalBrowserIP) {
+
+            chrome.runtime.sendMessage({
+                action: 'getDomainIPData',
+                tabId: activeTabId,
+                domain: queryDomain
+            }, function(response) {
+
                 if (response && response.ipData) {
                     render(response.ipData);
                 }
+
             });
+
         } else {
-            // 如果是解析出的IP，需要单独查询其地理位置
-            ajaxGet("https://geoip.loukky.com/ip.php?ip=" + encodeURIComponent(ip), function(info) {
+
+            // 真实公网IP
+            // 显示 browser-side GEO
+            ajaxGet(
+                "https://geoip.loukky.com/ip.php?ip=" + encodeURIComponent(ip),
+                function(info) {
+
+                    if (info.status === 'success') {
+                        render(info);
+                    }
+
+                }
+            );
+
+        }
+
+    } else {
+
+        // resolved_ips
+        // 永远显示自己的 GEO
+        ajaxGet(
+            "https://geoip.loukky.com/ip.php?ip=" + encodeURIComponent(ip),
+            function(info) {
+
                 if (info.status === 'success') {
                     render(info);
                 }
-            });
-        }
-    }); 
+
+            }
+        );
+
+    }
+
+});
 
     if (language.indexOf('CN') > -1) {
 		chrome.action.setTitle({title:"网站IP数据信息"});
