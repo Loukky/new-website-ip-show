@@ -60,9 +60,11 @@ var refreshClientIP = function() {
 
 var load = function(ip, domain) {
     var isv6 = false;
-    // 使用 domain-aware 查询，确保代理场景下各域名的数据独立
+    const isLocalIP = (ip === "127.0.0.1" || ip === "::1" || ip === "0.0.0.0" || ip === "localhost");
+    
+    // 先加载 DNS 列表（resolved_ips），使用 domainKey 获取
     chrome.runtime.sendMessage({action: 'getDomainIPData', tabId: activeTabId, domain: domain}, function(response) {
-        if (response && response.ipData) {
+        if (response && response.dnsData) {
             $.each(response.dnsData, function(k, v){
                 if (v.ip.indexOf(':') > -1) {
                     isv6 = true;
@@ -71,19 +73,31 @@ var load = function(ip, domain) {
                     $('#dns').append('<dd data-ip="' + v.ip + '"><span>' + v.ip + '<span><span class="arrows glyphicon glyphicon-triangle-right"></span></dd>')
                 }
             });
+        }
+        if (!isv6) {
+            T('layoutL').style.width = '25%';
+            T('layoutR').style.width = '75%';
+        }
+    });
+
+    // 再加载主显示区域数据（右侧面板）
+    // 设计规则：
+    // - 直连（非回环IP）：右侧面板显示 browser-side IP 的归属地
+    // - 代理（回环IP 127.0.0.1/::1）：右侧面板显示 server-side (domain) 的归属地
+    var displayIp = isLocalIP ? domain : ip;
+    chrome.runtime.sendMessage({action: 'getIPData', ip: isLocalIP ? ("domain:" + domain) : ip}, function(response) {
+        if (response && response.ipData) {
             render(response.ipData);
-            if (!isv6) {
-                T('layoutL').style.width = '25%';
-                T('layoutR').style.width = '75%';
-            }
             return;
         }
 
         // 如果缓存中没有数据，则查询API
-        // 总是用域名查询，获取 server-side 的解析IP列表（resolved_ips）
-        ajaxGet("https://geoip.loukky.com/ip.php?ip=" + encodeURIComponent(domain) + "&ecs=" + clientIP, function(info) {
+        // 直连：查 browser-side IP 获取归属地
+        // 代理：查域名获取 server-side 归属地
+        var queryTarget = isLocalIP ? domain : ip;
+        ajaxGet("https://geoip.loukky.com/ip.php?ip=" + encodeURIComponent(queryTarget) + "&ecs=" + clientIP, function(info) {
              if (info.status === 'success') {
-                // 保存数据到background
+                // 保存数据到background（同时保存 IP key 和 domain key）
                 chrome.runtime.sendMessage({
                     action: 'saveIPData',
                     ip: ip,
