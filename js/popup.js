@@ -60,8 +60,8 @@ var refreshClientIP = function() {
 
 var load = function(ip, domain) {
     var isv6 = false;
-    // V3中使用消息传递获取IP数据
-    chrome.runtime.sendMessage({action: 'getIPData', ip: ip}, function(response) {
+    // 使用 domain-aware 查询，确保代理场景下各域名的数据独立
+    chrome.runtime.sendMessage({action: 'getDomainIPData', tabId: activeTabId, domain: domain}, function(response) {
         if (response && response.ipData) {
             $.each(response.dnsData, function(k, v){
                 if (v.ip.indexOf(':') > -1) {
@@ -79,20 +79,17 @@ var load = function(ip, domain) {
             return;
         }
 
-        // 如果缓存中没有 browser-side IP 的数据，则优先使用 browser-side IP 查询
-        // 如果是本地回环IP，则改用域名查询 server-side IP
-        var queryTarget = ip;
-        if (ip === "127.0.0.1" || ip === "::1" || ip === "0.0.0.0" || ip === "localhost") {
-            queryTarget = domain;
-        }
-        ajaxGet("https://geoip.loukky.com/ip.php?ip=" + encodeURIComponent(queryTarget) + "&ecs=" + clientIP, function(info) {
+        // 如果缓存中没有数据，则查询API
+        // 总是用域名查询，获取 server-side 的解析IP列表（resolved_ips）
+        ajaxGet("https://geoip.loukky.com/ip.php?ip=" + encodeURIComponent(domain) + "&ecs=" + clientIP, function(info) {
              if (info.status === 'success') {
-                // 保存数据到background，以browser-side IP为key
-               chrome.runtime.sendMessage({
+                // 保存数据到background
+                chrome.runtime.sendMessage({
                     action: 'saveIPData',
-                    ip: ip, 
+                    ip: ip,
                     ipData: info,
-                    dnsData: (info.resolved_ips || []).map(function(i){ return {ip:i}; })
+                    domain: domain,
+                    resolved_ips: (info.resolved_ips || []).map(function(i){ return {ip:i}; })
                 });
                 render(info);
             } else {
@@ -105,7 +102,7 @@ var load = function(ip, domain) {
 var render = function(info){
     console.log("render触发:", info);
     T('show_ip').innerHTML = info.ip;
-    T('location').innerHTML = info.country + " " + info.province || ""+ " " + info.city || "";
+    T('location').innerHTML = [info.country, info.province, info.city].filter(Boolean).join(" ");
     T('isp').innerHTML = info.isp;
     T('asn').innerHTML = info.asn ? ("AS" + info.asn) : "";
     T('ports').textContent = "";
@@ -160,9 +157,9 @@ var init = function() {
         $('.ips dd').removeClass('active');
         $(this).addClass('active');
         
-        // 如果是主IP（browser_dns_ip），直接从缓存获取完整信息
+        // 如果是主IP（browser_dns_ip），使用 domain-aware 查询从缓存获取完整信息
         if (ip == queryIp) {
-            chrome.runtime.sendMessage({action: 'getIPData', ip: queryIp}, function(response) {
+            chrome.runtime.sendMessage({action: 'getDomainIPData', tabId: activeTabId, domain: queryDomain}, function(response) {
                 if (response && response.ipData) {
                     render(response.ipData);
                 }

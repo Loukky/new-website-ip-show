@@ -115,16 +115,25 @@ async function init() {
     console.log('🔄 恢复后的 tabsIPMap:', tabsIPMap);
     console.log('🔄 恢复后的 ipData:', ipData);
     
-    // 标记Storage已就绪
     storageReady = true;
     
-    // 在所有已存在的标签页上应用恢复后的图标状态（使用国家图标或默认图标）
+    // 在所有已存在的标签页上应用恢复后的图标状态
     const allTabIds = Object.keys(tabsIPMap).map(Number);
     for (const tabId of allTabIds) {
         const ip = tabsIPMap[tabId];
+        const domain = tabsDomainMap[tabId];
+        let info = null;
+        // 优先用 browser-side IP 的地理数据渲染图标（直连场景）
         if (ip && ipData[ip]) {
+            info = ipData[ip];
+        }
+        // 如果 browser IP 是回环地址（代理），则使用 server-side (domainKey) 数据
+        const domainKey = getDomainDataKey(domain);
+        if ((!info || ip === "127.0.0.1" || ip === "::1") && domainKey && ipData[domainKey]) {
+            info = ipData[domainKey];
+        }
+        if (info) {
             chrome.action.enable(tabId);
-            const info = ipData[ip];
             if (info.code2 && info.code2 !== "zz" && info.code2.length == 2) {
                 const iconPath = chrome.runtime.getURL("icons/" + info.code2.toUpperCase() + ".png");
                 chrome.action.setIcon({tabId: tabId, path: iconPath});
@@ -134,12 +143,16 @@ async function init() {
         }
     }
     
-    // 最后处理在恢复过程中暂存的标签页激活事件（确保覆盖 init 中设置的图标）
     if (pendingActivatedTabId !== null) {
         console.log('🔄 处理恢复期间暂存的标签页激活:', pendingActivatedTabId);
         handleTabActivated(pendingActivatedTabId);
         pendingActivatedTabId = null;
     }
+}
+
+function getDomainDataKey(domain) {
+    if (!domain) return null;
+    return "domain:" + domain;
 }
 
 async function initClientIP() {
@@ -152,7 +165,9 @@ async function initClientIP() {
     }
 }
 
-// tabId 参数可选：如果传入了 tabId，则为指定标签页设置图标（覆盖全局默认图标）
+// 渲染图标规则：
+// - 直连（browser IP 非回环）：使用 browser-side IP 的地理位置渲染国别图标
+// - 代理（browser IP 是回环 127.0.0.1/::1）：使用 server-side 的 IP 地理位置渲染国别图标
 var renderIcon = function(info, tabId){
     console.log('🎨 渲染图标，IP信息:', info, 'tabId:', tabId);
     var title = '';
@@ -190,7 +205,6 @@ var getSelection = function(info, tab) {
     chrome.tabs.create({url: url});
 };
 
-// 在Service Worker启动时创建contextMenu
 chrome.runtime.onStartup.addListener(() => {
     console.log('🔄 Service Worker onStartup');
     createContextMenu();
@@ -223,11 +237,9 @@ function createContextMenu() {
     });
 }
 
-// 立即创建contextMenu
 console.log('🚀 立即创建右键菜单');
 createContextMenu();
 
-// V3中使用onClicked事件监听器
 chrome.contextMenus.onClicked.addListener(function(info, tab) {
     console.log('🖱️ 右键菜单点击:', info.menuItemId, info.selectionText);
     if (info.menuItemId === "ipip") {
@@ -244,32 +256,48 @@ chrome.webRequest.onCompleted.addListener(function(details) {
         var domain = new URL(details.url).hostname;
         console.log('📍 获取到真实IP:', details.ip, '域名:', domain);
         
-        // 使用持久化存储
         setTabData(details.tabId, details.ip, domain);
 
-        // 优先使用浏览器实际连接的IP查询地理位置（browser-side IP）
-        // 如果是本地回环IP（127.0.0.1, ::1 等），则改用域名查询（server-side IP）
-        const lookupTarget = (details.ip === "127.0.0.1" || details.ip === "::1" || details.ip === "0.0.0.0" || details.ip === "localhost")
-            ? domain
-            : details.ip;
-        const apiUrl = "https://geoip.loukky.com/ip.php?ip=" + encodeURIComponent(lookupTarget) + '&ecs=' + clientIP;
-        console.log('🔍 查询IP地理位置信息:', details.ip, '查询目标:', lookupTarget);
-        console.log('🔍 请求URL:', apiUrl);
-        
-        ajaxGet(apiUrl, function(info){
-            console.log('📊 地理位置API返回结果:', info);
-            if (info.status == "success") {
-                // 存储完整的IP信息对象，供renderIcon和popup使用
-                setIpData(details.ip, info, (info.resolved_ips || []).map(function(ip) {
+        const isLocalIP = (details.ip === "127.0.0.1" || details.ip === "::1" || details.ip === "0.0.0.0" || details.ip === "localhost");
+
+        // ========== 第一步：始终用域名查询（获取server-side数据 + resolved_ips）==========
+        const domainApiUrl = "https://geoip.loukky.com/ip.php?ip=" + encodeURIComponent(domain) + '&ecs=' + clientIP;
+        console.log('🔍 [Server-Side] 域名查询:', domainApiUrl);
+        ajaxGet(domainApiUrl, function(domainInfo){
+            if (domainInfo.status == "success") {
+                // 保存 server-side 数据（以 domain 为 key，确保代理场景下各域名数据独立）
+                const domainKey = getDomainDataKey(domain);
+                setIpData(domainKey, domainInfo, (domainInfo.resolved_ips || []).map(function(ip) {
                     return {ip: ip};
                 }));
-                // 为当前标签页设置 per-tab 图标
-                renderIcon(info, details.tabId);
-                chrome.action.enable(details.tabId);
-                console.log('🎯 扩展已启用，IP:', details.ip);
+                // 如果浏览器IP是回环地址（代理场景），使用server-side的数据渲染国别图标
+                if (isLocalIP) {
+                    renderIcon(domainInfo, details.tabId);
+                    chrome.action.enable(details.tabId);
+                    console.log('🎯 [代理] 使用server-side IP渲染图标，IP:', domainInfo.ip);
+                }
             } else {
-                console.warn('⚠️ 地理位置API返回错误:', info);
-                chrome.action.disable(details.tabId);
+                console.warn('⚠️ 域名查询API返回错误:', domainInfo);
+            }
+        });
+
+        // ========== 第二步：始终用 browser-side IP 查询（获取直连IP地理位置，用于图标渲染）==========
+        const browserApiUrl = "https://geoip.loukky.com/ip.php?ip=" + encodeURIComponent(details.ip) + '&ecs=' + clientIP;
+        console.log('🔍 [Browser-Side] IP查询:', browserApiUrl);
+        ajaxGet(browserApiUrl, function(browserInfo){
+            if (browserInfo.status == "success") {
+                // 保存 browser-side 数据
+                setIpData(details.ip, browserInfo, (browserInfo.resolved_ips || []).map(function(ip) {
+                    return {ip: ip};
+                }));
+                // 如果是直连（非回环IP），使用 browser-side IP 的数据渲染国别图标
+                if (!isLocalIP) {
+                    renderIcon(browserInfo, details.tabId);
+                    chrome.action.enable(details.tabId);
+                    console.log('🎯 [直连] 使用browser-side IP渲染图标，IP:', details.ip);
+                }
+            } else {
+                console.warn('⚠️ IP查询API返回错误:', browserInfo);
             }
         });
     }
@@ -285,18 +313,31 @@ chrome.tabs.onCreated.addListener(function(tab){
     console.log('🔒 扩展已禁用，设置灰色图标');
 });
 
-// 提取标签页激活处理为单独函数，用于直接在onActivated和恢复后延迟调用
 function handleTabActivated(tabId) {
     console.log('🔄 处理标签页激活:', tabId);
-    if (tabsIPMap[tabId]) {
-        console.log('📍 找到已缓存的IP信息:', tabsIPMap[tabId]);
+    const ip = tabsIPMap[tabId];
+    const domain = tabsDomainMap[tabId];
+    if (ip) {
+        console.log('📍 找到已缓存的IP信息:', ip);
         chrome.action.enable(tabId);
-        if (ipData[tabsIPMap[tabId]]) {
-            console.log('🎨 重新渲染图标');
-            // 传入 tabId 确保图标正确设置到该标签页
-            renderIcon(ipData[tabsIPMap[tabId]], tabId);
+        const isLocalIP = (ip === "127.0.0.1" || ip === "::1" || ip === "0.0.0.0" || ip === "localhost");
+        let info = null;
+        if (isLocalIP) {
+            // 代理：用 server-side (domainKey) 数据渲染图标
+            const domainKey = getDomainDataKey(domain);
+            if (domainKey && ipData[domainKey]) {
+                info = ipData[domainKey];
+            }
         } else {
-            // 有IP缓存但没有地理位置数据时使用默认图标
+            // 直连：用 browser-side IP 数据渲染图标
+            if (ip && ipData[ip]) {
+                info = ipData[ip];
+            }
+        }
+        if (info) {
+            console.log('🎨 重新渲染图标');
+            renderIcon(info, tabId);
+        } else {
             chrome.action.setIcon({tabId: tabId, path: chrome.runtime.getURL("images/icon_38.png")});
         }
     } else {
@@ -309,10 +350,8 @@ function handleTabActivated(tabId) {
 chrome.tabs.onActivated.addListener(function(e){
     console.log('🔄 标签页激活事件:', e.tabId);
     if (!storageReady) {
-        // 如果Storage数据还在恢复中，暂存此tabId，待恢复完成后处理
         console.log('⏳ Storage正在恢复，暂存标签页激活:', e.tabId);
         pendingActivatedTabId = e.tabId;
-        // 先设置灰色图标，避免显示错误图标
         chrome.action.disable(e.tabId);
         chrome.action.setIcon({tabId: e.tabId, path: chrome.runtime.getURL("images/icon_gray_38.png")});
     } else {
@@ -336,11 +375,6 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse){
         console.log('📤 返回IP数据:', response);
         sendResponse(response);
         return true;
-    } else if (request.action === 'saveIPData') {
-        console.log('💾 保存IP数据:', request.ip, request.ipData);
-        setIpData(request.ip, request.ipData, request.resolved_ips);
-        sendResponse({success: true});
-        return true;
     } else if (request.action === 'getTabData') {
         console.log('📋 请求标签页数据');
         const response = {
@@ -350,6 +384,35 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse){
         };
         console.log('📤 返回标签页数据:', response);
         sendResponse(response);
+        return true;
+    } else if (request.action === 'getDomainIPData') {
+        // popup 通过 tabId 和 domain 获取独立的数据
+        console.log('📊 请求域名IP数据:', request.tabId, request.domain);
+        const ip = tabsIPMap[request.tabId];
+        const domainKey = getDomainDataKey(request.domain);
+        let data = null;
+        let dns = null;
+        // 优先找 domainKey（server-side 数据，针对代理和直连都需要展示的 resolved_ips）
+        if (domainKey && ipData[domainKey]) {
+            data = ipData[domainKey];
+            dns = dnsData[domainKey];
+        } else if (ip && ipData[ip]) {
+            // 直连场景：浏览器IP与服务器IP相同，browser-side数据就是 server-side 数据
+            data = ipData[ip];
+            dns = dnsData[ip];
+        }
+        console.log('📤 返回域名IP数据:', {data, dns});
+        sendResponse({ipData: data, dnsData: dns});
+        return true;
+    } else if (request.action === 'saveIPData') {
+        console.log('💾 保存IP数据:', request.ip, request.ipData);
+        setIpData(request.ip, request.ipData, request.resolved_ips);
+        // 如果提供了 domain，同时保存为 domainKey
+        if (request.domain) {
+            const domainKey = getDomainDataKey(request.domain);
+            setIpData(domainKey, request.ipData, request.resolved_ips);
+        }
+        sendResponse({success: true});
         return true;
     } else if (request.ds) {
         console.log('🌐 处理域名列表:', request.ds);
@@ -370,7 +433,6 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse){
     return false;
 });
 
-// 初始化：先恢复Storage中的数据，然后获取本机IP
 init().then(() => {
     console.log('✅ Storage数据恢复完成');
 });
