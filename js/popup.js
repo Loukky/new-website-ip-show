@@ -111,7 +111,7 @@ var render = function(info){
     T('location').innerHTML = [info.country, info.province, info.city].filter(Boolean).join(" ");
     T('isp').innerHTML = info.isp;
     T('asn').innerHTML = info.asn ? ("AS" + info.asn) : "";
-    T('ports').textContent = "";
+    //T('ports').textContent = "";
 };
 
 var refresh = function() {
