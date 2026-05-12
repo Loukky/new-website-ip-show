@@ -282,49 +282,49 @@ chrome.webRequest.onCompleted.addListener(function(details) {
         });
 
         // ========== 第二步：仅直连时查询 browser-side IP ==========
-if (!isLocalIP) {
+        if (!isLocalIP) {
 
-    const browserApiUrl =
-        "https://geoip.loukky.com/ip.php?ip=" +
-        encodeURIComponent(details.ip);
+            const browserApiUrl =
+                "https://geoip.loukky.com/ip.php?ip=" +
+                encodeURIComponent(details.ip);
 
-    console.log('🔍 [Browser-Side] IP查询:', browserApiUrl);
+            console.log('🔍 [Browser-Side] IP查询:', browserApiUrl);
 
-    ajaxGet(browserApiUrl, function(browserInfo){
+            ajaxGet(browserApiUrl, function(browserInfo){
 
-        if (browserInfo.status == "success") {
+                if (browserInfo.status == "success") {
 
-            // 保存 browser-side 数据
-            setIpData(
-                details.ip,
-                browserInfo,
-                (browserInfo.resolved_ips || []).map(function(ip) {
-                    return {ip: ip};
-                })
-            );
+                    // 保存 browser-side 数据
+                    setIpData(
+                        details.ip,
+                        browserInfo,
+                        (browserInfo.resolved_ips || []).map(function(ip) {
+                            return {ip: ip};
+                        })
+                    );
 
-            // 直连：使用 browser-side GEO
-            renderIcon(browserInfo, details.tabId);
+                    // 直连：使用 browser-side GEO
+                    renderIcon(browserInfo, details.tabId);
 
-            chrome.action.enable(details.tabId);
+                    chrome.action.enable(details.tabId);
 
-            console.log(
-                '🎯 [直连] 使用browser-side IP渲染图标，IP:',
-                details.ip
-            );
+                    console.log(
+                        '🎯 [直连] 使用browser-side IP渲染图标，IP:',
+                        details.ip
+                    );
 
-        } else {
+                } else {
 
-            console.warn(
-                '⚠️ IP查询API返回错误:',
-                browserInfo
-            );
+                    console.warn(
+                        '⚠️ IP查询API返回错误:',
+                        browserInfo
+                    );
 
+                }
+
+            });
         }
-
-    });
-
-}
+        }
 }, {
     urls: ["http://*/*", "https://*/*"],
     types: ["main_frame"]
