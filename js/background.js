@@ -171,13 +171,13 @@ async function initClientIP() {
 var renderIcon = function(info, tabId){
     console.log('🎨 渲染图标，IP信息:', info, 'tabId:', tabId);
     var title = '';
-    if (info.country && info.country.length > 0) {
-        title = info.country;
+    if (info.location && info.location.length > 0) {
+        title = info.location;
         console.log('🏷️ 设置标题:', title);
         if (lang.indexOf('CN') > -1) {
-            chrome.action.setTitle({title:"当前网站的IP地址为："+ title});
+            chrome.action.setTitle({title:"当前网站IP:"+ title});
         } else {
-            chrome.action.setTitle({title:"The current site IP GeoLocation："+ title});
+            chrome.action.setTitle({title:"The current site IP:"+ title});
         }
     }
     if (info.code2 && info.code2 !== "zz" && info.code2.length == 2) {
