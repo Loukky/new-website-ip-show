@@ -175,9 +175,9 @@ var renderIcon = function(info, tabId){
         title = info.country;
         console.log('🏷️ 设置标题:', title);
         if (lang.indexOf('CN') > -1) {
-            chrome.action.setTitle({title:"当前网站的IP地址为："+ title +"\n"+ "IP数据信息"});
+            chrome.action.setTitle({title:"当前网站的IP地址为："+ title});
         } else {
-            chrome.action.setTitle({title:"The current site IP GeoLocation："+ title +"\n"+ "IP Info"});
+            chrome.action.setTitle({title:"The current site IP GeoLocation："+ title});
         }
     }
     if (info.code2 && info.code2 !== "zz" && info.code2.length == 2) {
