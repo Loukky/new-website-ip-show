@@ -158,6 +158,10 @@ function getDomainDataKey(domain) {
 async function initClientIP() {
     try {
         const res = await fetch("https://geoip.loukky.com/myip.php");
+        if (!res.ok) {
+            console.warn("❌ myip.php 返回非200:", res.status);
+            return;
+        }
         clientIP = (await res.text()).trim();
         console.log("🌍 本机IP:", clientIP);
     } catch (e) {
@@ -249,7 +253,7 @@ chrome.contextMenus.onClicked.addListener(function(info, tab) {
 
 // V3中使用webRequest API（只观察模式，不阻塞）
 console.log('🔧 注册webRequest.onCompleted监听器');
-chrome.webRequest.onCompleted.addListener(function(details) {
+chrome.webRequest.onCompleted.addListener(async function(details) {
     console.log('🌐 WebRequest完成:', details.url, 'IP:', details.ip, 'TabId:', details.tabId);
     
     if (details.ip && details.tabId >= 0) {
@@ -261,6 +265,8 @@ chrome.webRequest.onCompleted.addListener(function(details) {
         const isLocalIP = (details.ip === "127.0.0.1" || details.ip === "::1" || details.ip === "0.0.0.0" || details.ip === "localhost");
 
         // ========== 第一步：始终用域名查询（获取server-side数据 + resolved_ips）==========
+        // 等待 clientIP 初始化完成，确保 ecs 参数正确
+        await clientIPReady;
         const domainApiUrl = "https://geoip.loukky.com/ip.php?ip=" + encodeURIComponent(domain) + '&ecs=' + clientIP;
         console.log('🔍 [Server-Side] 域名查询:', domainApiUrl);
         ajaxGet(domainApiUrl, function(domainInfo){
@@ -460,6 +466,6 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse){
 init().then(() => {
     console.log('✅ Storage数据恢复完成');
 });
-initClientIP();
+var clientIPReady = initClientIP();
 
 console.log('✅ Service Worker 初始化完成');
