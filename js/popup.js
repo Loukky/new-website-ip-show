@@ -66,7 +66,15 @@ var load = function(ip, domain) {
         if (response && response.dnsData) {
             $.each(response.dnsData, function(k, v){
                 if (v.ip != ip) {
-                    $('#dns').append('<dd data-ip="' + v.ip + '"><span>' + v.ip + '<span><span class="arrows glyphicon glyphicon-triangle-right"></span></dd>')
+                    var dd = document.createElement('dd');
+                    dd.setAttribute('data-ip', v.ip);
+                    var span = document.createElement('span');
+                    span.textContent = v.ip;
+                    dd.appendChild(span);
+                    var arrows = document.createElement('span');
+                    arrows.className = 'arrows glyphicon glyphicon-triangle-right';
+                    dd.appendChild(arrows);
+                    $('#dns').append(dd);
                 }
             });
         }
@@ -107,10 +115,10 @@ var load = function(ip, domain) {
 
 var render = function(info){
     console.log("render触发:", info);
-    T('show_ip').innerHTML = info.ip;
-    T('location').innerHTML = [info.country, info.province, info.city].filter(Boolean).join(" ");
-    T('isp').innerHTML = info.isp;
-    T('asn').innerHTML = info.asn ? ("AS" + info.asn) : "";
+    T('show_ip').textContent = info.ip;
+    T('location').textContent = [info.country, info.province, info.city].filter(Boolean).join(" ");
+    T('isp').textContent = info.isp;
+    T('asn').textContent = info.asn ? ("AS" + info.asn) : "";
     //T('ports').textContent = "";
 };
 
@@ -132,15 +140,11 @@ var refresh = function() {
                 load(queryIp, queryDomain);
             } else {
                 if (refreshCount >= maxRefresh) {
+                    T('load').style.display = '';
                     return;
                 }
-                chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
-                    if (tabs.length > 0) {
-                        activeTabId = tabs[0].id;
-                        refreshCount++;
-                        chrome.tabs.reload(activeTabId);
-                    }
-                });
+                refreshCount++;
+                console.log('⏳ 数据尚未就绪，等待下一轮查询');
             }
         }
     });
@@ -297,19 +301,25 @@ function domain_view_v3(domainList)
 {
     $('#domain_num').text(domainList.length);
     var ds = [];
-    var dhtml = [];
     domainList.sort(function(a, b){
         return b.amount - a.amount;
     });
     domainList.forEach(function(v, k){
         ds.push(v.domain);
-
-        dhtml.push('<dl class="dsl">');
-        dhtml.push('<dt>'+ v.domain +'</dt>');
-        dhtml.push('<dd>'+ v.amount +'</dd>');
-        dhtml.push('</dl>');
     });
-    $('#domains').html('<div>'+dhtml.join('')+'</div>');
+    var container = document.createElement('div');
+    domainList.forEach(function(v, k){
+        var dl = document.createElement('dl');
+        dl.className = 'dsl';
+        var dt = document.createElement('dt');
+        dt.textContent = v.domain;
+        dl.appendChild(dt);
+        var dd = document.createElement('dd');
+        dd.textContent = v.amount;
+        dl.appendChild(dd);
+        container.appendChild(dl);
+    });
+    $('#domains').empty().append(container);
     $('#copy').attr('data-clipboard-text', ds.join("\n"));
 }
 
